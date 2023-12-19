@@ -1,0 +1,88 @@
+import blockchain;
+
+array Hash [byte; 32];
+vector ByteVec <byte>;
+vector String <byte>; // for UTF-8 encoded bytes
+
+table Action {
+    script_info_hash: Byte32,   // script info
+    script_hash: Byte32,        // script
+    data: ByteVec,              // action data
+}
+vector ActionVec <Action>;
+
+table Message {
+    actions: ActionVec,
+}
+
+table ScriptInfo {
+    name: String,
+    url: String,
+    
+    script_hash: Byte32,
+    schema: String,
+    message_type: String,
+}
+vector ScriptInfoVec <ScriptInfo>;
+
+table BuildingPacketV1 {
+    message: Message,
+    payload: Transaction,
+    script_infos: ScriptInfoVec,
+    lock_actions: ActionVec,
+}
+
+union BuildingPacket {
+    BuildingPacketV1,
+}
+
+
+table SighashAll {
+    seal: ByteVec,
+    message: Message,
+}
+
+table SighashAllOnly {
+    seal: ByteVec,
+}
+
+table OtxStart {
+    start_input_cell: Uint32,
+    start_output_cell: Uint32,
+    start_cell_deps: Uint32,
+    start_header_deps: Uint32,
+}
+
+table SealPair {
+    script_hash: Byte32,
+    seal: ByteVec,
+}
+vector Seals <SealPair>;
+
+table Otx {
+    seals: Seals,
+    input_cells: Uint32,
+    output_cells: Uint32,
+    cell_deps: Uint32,
+    header_deps: Uint32,
+    message: Message,
+}
+
+union WitnessLayout {
+    SighashAll: 4278190081,
+    SighashAllOnly: 4278190082,
+    Otx: 4278190083,
+    OtxStart: 4278190084,
+}
+
+option BuildingPacketV1Opt (BuildingPacketV1);
+
+table BatchV1 {
+		txs: TransactionVec,
+		building_packet: BuildingPacketV1Opt,
+		script_infos: ScriptInfoVec,
+}
+
+union Batch {
+		BatchV1,
+}
