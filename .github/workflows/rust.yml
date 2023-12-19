@@ -1,0 +1,26 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install moleculec 0.7.5
+      run: cargo install moleculec@0.7.5
+    - name: Regenerate schema
+      run: moleculec --schema-file schemas/blockchain.mol --language rust > src/schemas/blockchain.rs && moleculec --schema-file schemas/cobuild.mol --language rust > src/schemas/cobuild.rs && cargo fmt --all
+    - name: Build
+      run: cargo build --verbose
+    - name: No file is changed
+      run: git diff --exit-code
