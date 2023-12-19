@@ -38,6 +38,13 @@ fn main() {
     // Message is kept in the first witness
     generate_sighash_all_example(&mut rng, "sighash_all1.data", 2, 3, 0, 0, 5, 0);
 
+    // SighashAll tx with 2 inputs, 2 outputs, 2 cell deps, 1 header dep, 1 witness
+    // Message is kept in the first witness
+    generate_sighash_all_example(&mut rng, "sighash_all2.data", 2, 2, 2, 1, 1, 0);
+
+    // SighashAllOnly tx with 1 input, 1 output, 3 witnesses, 1 cell dep
+    generate_sighash_all_only_example(&mut rng, "sighash_all_only1.data", 1, 1, 1, 0, 3);
+
     // Otx with 2 inputs, 3 outputs, 1 cell deps, 4 header deps
     generate_otx_example(&mut rng, "otx1.data", 2, 3, 1, 4);
 
@@ -92,12 +99,56 @@ fn generate_sighash_all_example(
     std::fs::write(filename, tx.data().as_slice()).expect("write");
 
     let skeleton_hash = build_sighash_all_skeleton_hash(&tx);
-    let signing_message_hash = build_signing_message_hash(&message, &skeleton_hash);
+    let signing_message_hash = build_signing_message_hash(Some(&message), &skeleton_hash);
 
     println!("Sighash all example written to {}", filename);
     println!("  skeleton hash: {:#x}", skeleton_hash);
     println!("  signing message hash: {:#x}", signing_message_hash);
     println!("  Message is kept in witness #{}", message_witness_index);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn generate_sighash_all_only_example(
+    rng: &mut StdRng,
+    filename: &str,
+    input_cells: u32,
+    output_cells: u32,
+    cell_deps: u32,
+    header_deps: u32,
+    witnesses: u32,
+) {
+    let mut builder = TransactionBuilder::default();
+
+    for _ in 0..input_cells {
+        builder = builder.input(new_input(rng));
+    }
+    for _ in 0..output_cells {
+        let (output, data) = new_output(rng);
+        builder = builder.output(output).output_data(data);
+    }
+    for _ in 0..cell_deps {
+        builder = builder.cell_dep(new_cell_dep(rng));
+    }
+    for _ in 0..header_deps {
+        builder = builder.header_dep(new_header_dep(rng));
+    }
+    for _ in 0..witnesses {
+        builder = builder.witness(new_witness(rng));
+    }
+
+    let tx = builder.build();
+
+    std::fs::write(filename, tx.data().as_slice()).expect("write");
+
+    let skeleton_hash = build_sighash_all_skeleton_hash(&tx);
+    let signing_message_hash = build_signing_message_hash(None, &skeleton_hash);
+
+    println!(
+        "Sighash all only example(i.e., tx without Message) written to {}",
+        filename
+    );
+    println!("  skeleton hash: {:#x}", skeleton_hash);
+    println!("  signing message hash: {:#x}", signing_message_hash);
 }
 
 fn generate_otx_example(
@@ -139,7 +190,7 @@ fn generate_otx_example(
     std::fs::write(filename, tx.data().as_slice()).expect("write");
 
     let skeleton_hash = build_otx_skeleton_hash(&tx);
-    let signing_message_hash = build_signing_message_hash(&message, &skeleton_hash);
+    let signing_message_hash = build_signing_message_hash(Some(&message), &skeleton_hash);
 
     println!("Otx example written to {}", filename);
     println!("  skeleton hash: {:#x}", skeleton_hash);
@@ -334,12 +385,18 @@ fn build_otx_skeleton_hash(tx: &TransactionView) -> Byte32 {
     output.pack()
 }
 
-fn build_signing_message_hash(message: &Message, skeleton_hash: &Byte32) -> Byte32 {
+fn build_signing_message_hash(message: Option<&Message>, skeleton_hash: &Byte32) -> Byte32 {
     let mut blake2b = Blake2bBuilder::new(32)
-        .personal(b"ckb-cobuild-msgh")
+        .personal(if message.is_some() {
+            b"ckb-cobuild-msgh"
+        } else {
+            b"ckb-cobuild-msge"
+        })
         .build();
 
-    blake2b.update(message.as_slice());
+    if let Some(message) = message {
+        blake2b.update(message.as_slice());
+    }
     blake2b.update(&skeleton_hash.raw_data());
 
     let mut output = [0u8; 32];
