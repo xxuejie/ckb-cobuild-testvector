@@ -98,11 +98,9 @@ fn generate_sighash_all_example(
 
     std::fs::write(filename, tx.data().as_slice()).expect("write");
 
-    let skeleton_hash = build_sighash_all_skeleton_hash(&tx);
-    let signing_message_hash = build_signing_message_hash(Some(&message), &skeleton_hash);
+    let signing_message_hash = build_sighash_all_signing_hash(Some(&message), &tx);
 
     println!("Sighash all example written to {}", filename);
-    println!("  skeleton hash: {:#x}", skeleton_hash);
     println!("  signing message hash: {:#x}", signing_message_hash);
     println!("  Message is kept in witness #{}", message_witness_index);
 }
@@ -140,14 +138,12 @@ fn generate_sighash_all_only_example(
 
     std::fs::write(filename, tx.data().as_slice()).expect("write");
 
-    let skeleton_hash = build_sighash_all_skeleton_hash(&tx);
-    let signing_message_hash = build_signing_message_hash(None, &skeleton_hash);
+    let signing_message_hash = build_sighash_all_signing_hash(None, &tx);
 
     println!(
         "Sighash all only example(i.e., tx without Message) written to {}",
         filename
     );
-    println!("  skeleton hash: {:#x}", skeleton_hash);
     println!("  signing message hash: {:#x}", signing_message_hash);
 }
 
@@ -189,11 +185,9 @@ fn generate_otx_example(
 
     std::fs::write(filename, tx.data().as_slice()).expect("write");
 
-    let skeleton_hash = build_otx_skeleton_hash(&tx);
-    let signing_message_hash = build_signing_message_hash(Some(&message), &skeleton_hash);
+    let signing_message_hash = build_otx_signing_hash(&message, &tx);
 
     println!("Otx example written to {}", filename);
-    println!("  skeleton hash: {:#x}", skeleton_hash);
     println!("  signing message hash: {:#x}", signing_message_hash);
     println!("  Message is kept in witness #0");
 }
@@ -318,36 +312,9 @@ fn new_header_dep(rng: &mut StdRng) -> Byte32 {
     header.pack()
 }
 
-fn build_sighash_all_skeleton_hash(tx: &TransactionView) -> Byte32 {
+fn build_otx_signing_hash(message: &Message, tx: &TransactionView) -> Byte32 {
     debug!(
-        "Building SighashAll skeleton hash for tx with {} inputs, {} outputs, {} witnesses",
-        tx.inputs().len(),
-        tx.outputs().len(),
-        tx.witnesses().len()
-    );
-
-    let mut blake2b = Blake2bBuilder::new(32)
-        .personal(b"ckb-cobuild-sgkh")
-        .build();
-
-    debug!("Hashing tx hash: {:x}", tx.hash());
-    blake2b.update(&tx.hash().raw_data());
-
-    let inputs_len = tx.inputs().len();
-    for (i, witness) in tx.witnesses().into_iter().enumerate().skip(inputs_len) {
-        debug!("Hashing witness at index {}, len: {}", i, witness.len());
-        blake2b.update(&(witness.len() as u64).to_le_bytes());
-        blake2b.update(&witness.raw_data());
-    }
-
-    let mut output = [0u8; 32];
-    blake2b.finalize(&mut output);
-    output.pack()
-}
-
-fn build_otx_skeleton_hash(tx: &TransactionView) -> Byte32 {
-    debug!(
-        "Building Otx skeleton hash for tx with {} inputs, {} outputs, {} cell deps, {} header deps",
+        "Building Otx signing hash for tx with {} inputs, {} outputs, {} cell deps, {} header deps",
         tx.inputs().len(),
         tx.outputs().len(),
         tx.cell_deps().len(),
@@ -355,8 +322,10 @@ fn build_otx_skeleton_hash(tx: &TransactionView) -> Byte32 {
     );
 
     let mut blake2b = Blake2bBuilder::new(32)
-        .personal(b"ckb-cobuild-oxkh")
+        .personal(b"ckb-tcob-otxhash")
         .build();
+
+    blake2b.update(message.as_slice());
 
     blake2b.update(&(tx.inputs().len() as u64).to_le_bytes());
     for input in tx.inputs().into_iter() {
@@ -385,19 +354,35 @@ fn build_otx_skeleton_hash(tx: &TransactionView) -> Byte32 {
     output.pack()
 }
 
-fn build_signing_message_hash(message: Option<&Message>, skeleton_hash: &Byte32) -> Byte32 {
+fn build_sighash_all_signing_hash(message: Option<&Message>, tx: &TransactionView) -> Byte32 {
     let mut blake2b = Blake2bBuilder::new(32)
         .personal(if message.is_some() {
-            b"ckb-cobuild-msgh"
+            b"ckb-tcob-sighash"
         } else {
-            b"ckb-cobuild-msge"
+            b"ckb-tcob-sgohash"
         })
         .build();
 
     if let Some(message) = message {
         blake2b.update(message.as_slice());
     }
-    blake2b.update(&skeleton_hash.raw_data());
+
+    debug!(
+        "Building SighashAll signing hash for tx with {} inputs, {} outputs, {} witnesses",
+        tx.inputs().len(),
+        tx.outputs().len(),
+        tx.witnesses().len()
+    );
+
+    debug!("Hashing tx hash: {:x}", tx.hash());
+    blake2b.update(&tx.hash().raw_data());
+
+    let inputs_len = tx.inputs().len();
+    for (i, witness) in tx.witnesses().into_iter().enumerate().skip(inputs_len) {
+        debug!("Hashing witness at index {}, len: {}", i, witness.len());
+        blake2b.update(&(witness.len() as u64).to_le_bytes());
+        blake2b.update(&witness.raw_data());
+    }
 
     let mut output = [0u8; 32];
     blake2b.finalize(&mut output);
