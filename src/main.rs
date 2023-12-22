@@ -1,23 +1,18 @@
 mod schemas;
 
-use crate::schemas::{
-    blockchain::{
-        self, Byte32Builder, BytesVecBuilder, CellOutputVecBuilder, Uint32, Uint32Builder,
-    },
-    cobuild::{
-        Action, ActionBuilder, ActionVecBuilder, BuildingPacket, BuildingPacketBuilder,
-        BuildingPacketUnion, BuildingPacketV1Builder, ByteVecBuilder, Message, MessageBuilder,
-        OtxBuilder, ResolvedInputsBuilder, SighashAllBuilder, SighashAllOnlyBuilder,
-        WitnessLayoutBuilder,
-    },
+use crate::schemas::cobuild::{
+    Action, ActionBuilder, ActionVecBuilder, BuildingPacket, BuildingPacketBuilder,
+    BuildingPacketUnion, BuildingPacketV1Builder, ByteVecBuilder, Message, MessageBuilder,
+    OtxBuilder, ResolvedInputsBuilder, SighashAllBuilder, SighashAllOnlyBuilder,
+    WitnessLayoutBuilder,
 };
 use blake2b_ref::Blake2bBuilder;
-// TODO: Remove ckb_types here for a single unified use of blockchain types
 use ckb_types::{
     core::TransactionBuilder,
     packed::{
-        Byte32, Bytes, CellDep, CellDepBuilder, CellInput, CellInputBuilder, CellOutput,
-        CellOutputBuilder, OutPoint, Script, ScriptBuilder,
+        Byte32, Byte32Builder, Bytes, BytesVecBuilder, CellDep, CellDepBuilder, CellInput,
+        CellInputBuilder, CellOutput, CellOutputBuilder, CellOutputVecBuilder, OutPoint, Script,
+        ScriptBuilder, Uint32, Uint32Builder,
     },
     prelude::*,
 };
@@ -80,10 +75,8 @@ fn generate_sighash_all_example(
         builder = builder.input(new_input(rng));
 
         let (output, data) = new_output(rng);
-        cell_input_builder =
-            cell_input_builder.push(blockchain::CellOutput::from_slice(output.as_slice()).unwrap());
-        cell_input_data_builder =
-            cell_input_data_builder.push(blockchain::Bytes::from_slice(data.as_slice()).unwrap());
+        cell_input_builder = cell_input_builder.push(output);
+        cell_input_data_builder = cell_input_data_builder.push(data);
     }
     for _ in 0..output_cells {
         let (output, data) = new_output(rng);
@@ -122,7 +115,7 @@ fn generate_sighash_all_example(
         .set(
             BuildingPacketV1Builder::default()
                 .message(message)
-                .payload(blockchain::Transaction::from_slice(tx.data().as_slice()).unwrap())
+                .payload(tx.data())
                 .resolved_inputs(resolved_inputs)
                 .build(),
         )
@@ -158,10 +151,8 @@ fn generate_sighash_all_only_example(
         builder = builder.input(new_input(rng));
 
         let (output, data) = new_output(rng);
-        cell_input_builder =
-            cell_input_builder.push(blockchain::CellOutput::from_slice(output.as_slice()).unwrap());
-        cell_input_data_builder =
-            cell_input_data_builder.push(blockchain::Bytes::from_slice(data.as_slice()).unwrap());
+        cell_input_builder = cell_input_builder.push(output);
+        cell_input_data_builder = cell_input_data_builder.push(data);
     }
     for _ in 0..output_cells {
         let (output, data) = new_output(rng);
@@ -194,7 +185,7 @@ fn generate_sighash_all_only_example(
     let packet = BuildingPacketBuilder::default()
         .set(
             BuildingPacketV1Builder::default()
-                .payload(blockchain::Transaction::from_slice(tx.data().as_slice()).unwrap())
+                .payload(tx.data())
                 .resolved_inputs(resolved_inputs)
                 .build(),
         )
@@ -237,10 +228,8 @@ fn generate_otx_example(
         builder = builder.input(new_input(rng));
 
         let (output, data) = new_output(rng);
-        cell_input_builder =
-            cell_input_builder.push(blockchain::CellOutput::from_slice(output.as_slice()).unwrap());
-        cell_input_data_builder =
-            cell_input_data_builder.push(blockchain::Bytes::from_slice(data.as_slice()).unwrap());
+        cell_input_builder = cell_input_builder.push(output);
+        cell_input_data_builder = cell_input_data_builder.push(data);
     }
     for _ in 0..output_cells {
         let (output, data) = new_output(rng);
@@ -264,7 +253,7 @@ fn generate_otx_example(
         .set(
             BuildingPacketV1Builder::default()
                 .message(message)
-                .payload(blockchain::Transaction::from_slice(tx.data().as_slice()).unwrap())
+                .payload(tx.data())
                 .resolved_inputs(resolved_inputs)
                 .build(),
         )

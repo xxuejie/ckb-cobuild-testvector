@@ -19,7 +19,7 @@ jobs:
     - name: Install moleculec 0.7.5
       run: cargo install moleculec@0.7.5
     - name: Regenerate schema
-      run: moleculec --schema-file schemas/blockchain.mol --language rust > src/schemas/blockchain.rs && moleculec --schema-file schemas/cobuild.mol --language rust > src/schemas/cobuild.rs && cargo fmt --all
+      run: moleculec --schema-file schemas/cobuild.mol --language rust > src/schemas/cobuild.rs && cargo fmt --all
     - name: Build
       run: cargo build --verbose
     - name: No file is changed
