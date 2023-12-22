@@ -83,6 +83,7 @@ name = "ckb-cobuild-testvector"
 version = "0.1.0"
 dependencies = [
  "blake2b-ref",
+ "ckb-hash",
  "ckb-types",
  "env_logger",
  "log",

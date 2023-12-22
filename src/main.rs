@@ -1,15 +1,20 @@
 mod schemas;
 
 use crate::schemas::{
-    blockchain::{Byte32Builder, Uint32, Uint32Builder},
+    blockchain::{
+        self, Byte32Builder, BytesVecBuilder, CellOutputVecBuilder, Uint32, Uint32Builder,
+    },
     cobuild::{
-        Action, ActionBuilder, ActionVecBuilder, ByteVecBuilder, Message, MessageBuilder,
-        OtxBuilder, SighashAllBuilder, WitnessLayoutBuilder,
+        Action, ActionBuilder, ActionVecBuilder, BuildingPacket, BuildingPacketBuilder,
+        BuildingPacketUnion, BuildingPacketV1Builder, ByteVecBuilder, Message, MessageBuilder,
+        OtxBuilder, ResolvedInputsBuilder, SighashAllBuilder, SighashAllOnlyBuilder,
+        WitnessLayoutBuilder,
     },
 };
 use blake2b_ref::Blake2bBuilder;
+// TODO: Remove ckb_types here for a single unified use of blockchain types
 use ckb_types::{
-    core::{Capacity, TransactionBuilder, TransactionView},
+    core::TransactionBuilder,
     packed::{
         Byte32, Bytes, CellDep, CellDepBuilder, CellInput, CellInputBuilder, CellOutput,
         CellOutputBuilder, OutPoint, Script, ScriptBuilder,
@@ -66,15 +71,19 @@ fn generate_sighash_all_example(
     assert!(message_witness_index < witnesses);
 
     let message = new_message(rng);
-    let sighash_all = SighashAllBuilder::default()
-        .message(message.clone())
-        .build();
-    let witness_layout = WitnessLayoutBuilder::default().set(sighash_all).build();
 
     let mut builder = TransactionBuilder::default();
+    let mut cell_input_builder = CellOutputVecBuilder::default();
+    let mut cell_input_data_builder = BytesVecBuilder::default();
 
     for _ in 0..input_cells {
         builder = builder.input(new_input(rng));
+
+        let (output, data) = new_output(rng);
+        cell_input_builder =
+            cell_input_builder.push(blockchain::CellOutput::from_slice(output.as_slice()).unwrap());
+        cell_input_data_builder =
+            cell_input_data_builder.push(blockchain::Bytes::from_slice(data.as_slice()).unwrap());
     }
     for _ in 0..output_cells {
         let (output, data) = new_output(rng);
@@ -88,7 +97,15 @@ fn generate_sighash_all_example(
     }
     for i in 0..witnesses {
         if i == message_witness_index {
-            builder = builder.witness(witness_layout.as_bytes().pack());
+            let a = WitnessLayoutBuilder::default()
+                .set(SighashAllBuilder::default().build())
+                .build();
+            builder = builder.witness(a.as_bytes().pack());
+        } else if i < input_cells {
+            let o = WitnessLayoutBuilder::default()
+                .set(SighashAllOnlyBuilder::default().build())
+                .build();
+            builder = builder.witness(o.as_bytes().pack());
         } else {
             builder = builder.witness(new_witness(rng));
         }
@@ -96,11 +113,29 @@ fn generate_sighash_all_example(
 
     let tx = builder.build();
 
-    std::fs::write(filename, tx.data().as_slice()).expect("write");
+    let resolved_inputs = ResolvedInputsBuilder::default()
+        .outputs(cell_input_builder.build())
+        .outputs_data(cell_input_data_builder.build())
+        .build();
 
-    let signing_message_hash = build_sighash_all_signing_hash(Some(&message), &tx);
+    let packet = BuildingPacketBuilder::default()
+        .set(
+            BuildingPacketV1Builder::default()
+                .message(message)
+                .payload(blockchain::Transaction::from_slice(tx.data().as_slice()).unwrap())
+                .resolved_inputs(resolved_inputs)
+                .build(),
+        )
+        .build();
 
-    println!("Sighash all example written to {}", filename);
+    std::fs::write(filename, packet.as_slice()).expect("write");
+
+    let signing_message_hash = build_sighash_all_signing_hash(&packet, false);
+
+    println!(
+        "Sighash all example written to {} as BuildingPacket",
+        filename
+    );
     println!("  signing message hash: {:#x}", signing_message_hash);
     println!("  Message is kept in witness #{}", message_witness_index);
 }
@@ -116,9 +151,17 @@ fn generate_sighash_all_only_example(
     witnesses: u32,
 ) {
     let mut builder = TransactionBuilder::default();
+    let mut cell_input_builder = CellOutputVecBuilder::default();
+    let mut cell_input_data_builder = BytesVecBuilder::default();
 
     for _ in 0..input_cells {
         builder = builder.input(new_input(rng));
+
+        let (output, data) = new_output(rng);
+        cell_input_builder =
+            cell_input_builder.push(blockchain::CellOutput::from_slice(output.as_slice()).unwrap());
+        cell_input_data_builder =
+            cell_input_data_builder.push(blockchain::Bytes::from_slice(data.as_slice()).unwrap());
     }
     for _ in 0..output_cells {
         let (output, data) = new_output(rng);
@@ -130,18 +173,39 @@ fn generate_sighash_all_only_example(
     for _ in 0..header_deps {
         builder = builder.header_dep(new_header_dep(rng));
     }
-    for _ in 0..witnesses {
-        builder = builder.witness(new_witness(rng));
+    for i in 0..witnesses {
+        if i < input_cells {
+            let o = WitnessLayoutBuilder::default()
+                .set(SighashAllOnlyBuilder::default().build())
+                .build();
+            builder = builder.witness(o.as_bytes().pack());
+        } else {
+            builder = builder.witness(new_witness(rng));
+        }
     }
 
     let tx = builder.build();
 
-    std::fs::write(filename, tx.data().as_slice()).expect("write");
+    let resolved_inputs = ResolvedInputsBuilder::default()
+        .outputs(cell_input_builder.build())
+        .outputs_data(cell_input_data_builder.build())
+        .build();
 
-    let signing_message_hash = build_sighash_all_signing_hash(None, &tx);
+    let packet = BuildingPacketBuilder::default()
+        .set(
+            BuildingPacketV1Builder::default()
+                .payload(blockchain::Transaction::from_slice(tx.data().as_slice()).unwrap())
+                .resolved_inputs(resolved_inputs)
+                .build(),
+        )
+        .build();
+
+    std::fs::write(filename, packet.as_slice()).expect("write");
+
+    let signing_message_hash = build_sighash_all_signing_hash(&packet, true);
 
     println!(
-        "Sighash all only example(i.e., tx without Message) written to {}",
+        "Sighash all only example(i.e., tx without Message) written to {} as BuildingPacket",
         filename
     );
     println!("  signing message hash: {:#x}", signing_message_hash);
@@ -166,9 +230,17 @@ fn generate_otx_example(
     let witness_layout = WitnessLayoutBuilder::default().set(otx).build();
 
     let mut builder = TransactionBuilder::default().witness(witness_layout.as_bytes().pack());
+    let mut cell_input_builder = CellOutputVecBuilder::default();
+    let mut cell_input_data_builder = BytesVecBuilder::default();
 
     for _ in 0..input_cells {
         builder = builder.input(new_input(rng));
+
+        let (output, data) = new_output(rng);
+        cell_input_builder =
+            cell_input_builder.push(blockchain::CellOutput::from_slice(output.as_slice()).unwrap());
+        cell_input_data_builder =
+            cell_input_data_builder.push(blockchain::Bytes::from_slice(data.as_slice()).unwrap());
     }
     for _ in 0..output_cells {
         let (output, data) = new_output(rng);
@@ -183,13 +255,27 @@ fn generate_otx_example(
 
     let tx = builder.build();
 
-    std::fs::write(filename, tx.data().as_slice()).expect("write");
+    let resolved_inputs = ResolvedInputsBuilder::default()
+        .outputs(cell_input_builder.build())
+        .outputs_data(cell_input_data_builder.build())
+        .build();
 
-    let signing_message_hash = build_otx_signing_hash(&message, &tx);
+    let packet = BuildingPacketBuilder::default()
+        .set(
+            BuildingPacketV1Builder::default()
+                .message(message)
+                .payload(blockchain::Transaction::from_slice(tx.data().as_slice()).unwrap())
+                .resolved_inputs(resolved_inputs)
+                .build(),
+        )
+        .build();
 
-    println!("Otx example written to {}", filename);
+    std::fs::write(filename, packet.as_slice()).expect("write");
+
+    let signing_message_hash = build_otx_signing_hash(&packet);
+
+    println!("Otx example written to {} as BuildingPacket", filename);
     println!("  signing message hash: {:#x}", signing_message_hash);
-    println!("  Message is kept in witness #0");
 }
 
 fn new_message(rng: &mut StdRng) -> Message {
@@ -217,7 +303,7 @@ fn new_message(rng: &mut StdRng) -> Message {
             let mut data = vec![0u8; data_len];
             rng.fill(&mut data[..]);
             let data = ByteVecBuilder::default()
-                .extend(data.into_iter().map(|b| Byte::new(b)))
+                .extend(data.into_iter().map(Byte::new))
                 .build();
 
             ActionBuilder::default()
@@ -277,7 +363,7 @@ fn new_output(rng: &mut StdRng) -> (CellOutput, Bytes) {
     let data = data.pack();
 
     let cell_output = CellOutputBuilder::default()
-        .capacity(Capacity::bytes(cell_ckbytes).expect("capacity").pack())
+        .capacity((cell_ckbytes as u64 * 100_000_000).pack())
         .lock(new_script(rng))
         .type_(
             (if has_type {
@@ -312,40 +398,59 @@ fn new_header_dep(rng: &mut StdRng) -> Byte32 {
     header.pack()
 }
 
-fn build_otx_signing_hash(message: &Message, tx: &TransactionView) -> Byte32 {
+fn build_otx_signing_hash(packet: &BuildingPacket) -> Byte32 {
+    let BuildingPacketUnion::BuildingPacketV1(v1_packet) = packet.to_enum();
+    let tx = v1_packet.payload();
+
     debug!(
         "Building Otx signing hash for tx with {} inputs, {} outputs, {} cell deps, {} header deps",
-        tx.inputs().len(),
-        tx.outputs().len(),
-        tx.cell_deps().len(),
-        tx.header_deps().len(),
+        tx.raw().inputs().len(),
+        tx.raw().outputs().len(),
+        tx.raw().cell_deps().len(),
+        tx.raw().header_deps().len(),
     );
 
     let mut blake2b = Blake2bBuilder::new(32)
         .personal(b"ckb-tcob-otxhash")
         .build();
 
-    blake2b.update(message.as_slice());
+    blake2b.update(v1_packet.message().as_slice());
 
-    blake2b.update(&(tx.inputs().len() as u64).to_le_bytes());
-    for input in tx.inputs().into_iter() {
+    blake2b.update(&(tx.raw().inputs().len() as u32).to_le_bytes());
+    for (i, input) in tx.raw().inputs().into_iter().enumerate() {
         blake2b.update(input.as_slice());
+        blake2b.update(
+            v1_packet
+                .resolved_inputs()
+                .outputs()
+                .get(i)
+                .expect("indexing input")
+                .as_slice(),
+        );
+        let data = v1_packet
+            .resolved_inputs()
+            .outputs_data()
+            .get(i)
+            .expect("indexing input data");
+        blake2b.update(&(data.len() as u32).to_le_bytes());
+        blake2b.update(&data.raw_data());
     }
 
-    blake2b.update(&(tx.outputs().len() as u64).to_le_bytes());
-    for (output, data) in tx.outputs_with_data_iter() {
+    blake2b.update(&(tx.raw().outputs().len() as u32).to_le_bytes());
+    for (i, output) in tx.raw().outputs().into_iter().enumerate() {
+        let data = tx.raw().outputs_data().get(i).expect("indexing cell data");
         blake2b.update(output.as_slice());
-        blake2b.update(&(data.len() as u64).to_le_bytes());
-        blake2b.update(&data);
+        blake2b.update(&(data.len() as u32).to_le_bytes());
+        blake2b.update(&data.raw_data());
     }
 
-    blake2b.update(&(tx.cell_deps().len() as u64).to_le_bytes());
-    for cell_dep in tx.cell_deps_iter() {
+    blake2b.update(&(tx.raw().cell_deps().len() as u32).to_le_bytes());
+    for cell_dep in tx.raw().cell_deps().into_iter() {
         blake2b.update(cell_dep.as_slice());
     }
 
-    blake2b.update(&(tx.header_deps().len() as u64).to_le_bytes());
-    for header_dep in tx.header_deps_iter() {
+    blake2b.update(&(tx.raw().header_deps().len() as u32).to_le_bytes());
+    for header_dep in tx.raw().header_deps().into_iter() {
         blake2b.update(header_dep.as_slice());
     }
 
@@ -354,33 +459,60 @@ fn build_otx_signing_hash(message: &Message, tx: &TransactionView) -> Byte32 {
     output.pack()
 }
 
-fn build_sighash_all_signing_hash(message: Option<&Message>, tx: &TransactionView) -> Byte32 {
+fn build_sighash_all_signing_hash(packet: &BuildingPacket, sighash_all_only: bool) -> Byte32 {
     let mut blake2b = Blake2bBuilder::new(32)
-        .personal(if message.is_some() {
+        .personal(if !sighash_all_only {
             b"ckb-tcob-sighash"
         } else {
             b"ckb-tcob-sgohash"
         })
         .build();
 
-    if let Some(message) = message {
-        blake2b.update(message.as_slice());
+    let BuildingPacketUnion::BuildingPacketV1(v1_packet) = packet.to_enum();
+    let tx = v1_packet.payload();
+
+    if !sighash_all_only {
+        blake2b.update(v1_packet.message().as_slice());
     }
 
     debug!(
         "Building SighashAll signing hash for tx with {} inputs, {} outputs, {} witnesses",
-        tx.inputs().len(),
-        tx.outputs().len(),
+        tx.raw().inputs().len(),
+        tx.raw().outputs().len(),
         tx.witnesses().len()
     );
 
-    debug!("Hashing tx hash: {:x}", tx.hash());
-    blake2b.update(&tx.hash().raw_data());
+    let hash: molecule::bytes::Bytes = ckb_hash::blake2b_256(tx.raw().as_slice()).to_vec().into();
+    debug!("Hashing tx hash: {:x}", hash);
+    blake2b.update(&hash);
 
-    let inputs_len = tx.inputs().len();
+    for (i, _) in tx.raw().inputs().into_iter().enumerate() {
+        let data = v1_packet
+            .resolved_inputs()
+            .outputs_data()
+            .get(i)
+            .expect("indexing input data");
+        debug!(
+            "Hashing input cell content at index {}, cell data len: {}",
+            i,
+            data.len()
+        );
+        blake2b.update(
+            v1_packet
+                .resolved_inputs()
+                .outputs()
+                .get(i)
+                .expect("indexing input")
+                .as_slice(),
+        );
+        blake2b.update(&(data.len() as u32).to_le_bytes());
+        blake2b.update(&data.raw_data());
+    }
+
+    let inputs_len = tx.raw().inputs().len();
     for (i, witness) in tx.witnesses().into_iter().enumerate().skip(inputs_len) {
         debug!("Hashing witness at index {}, len: {}", i, witness.len());
-        blake2b.update(&(witness.len() as u64).to_le_bytes());
+        blake2b.update(&(witness.len() as u32).to_le_bytes());
         blake2b.update(&witness.raw_data());
     }
 

@@ -25,9 +25,18 @@ table ScriptInfo {
 }
 vector ScriptInfoVec <ScriptInfo>;
 
+table ResolvedInputs {
+		outputs: CellOutputVec,
+		outputs_data: BytesVec,
+}
+
+option Uint32Opt (Uint32);
+
 table BuildingPacketV1 {
     message: Message,
     payload: Transaction,
+		resolved_inputs: ResolvedInputs,
+    change_output: Uint32Opt,
     script_infos: ScriptInfoVec,
     lock_actions: ActionVec,
 }
